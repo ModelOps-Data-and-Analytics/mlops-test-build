@@ -1,83 +1,200 @@
-## Welcome
+# Automate AIOps with Amazon SageMaker Unified Studio projects - Model Build
 
-SageMaker Unified Studio is an integrated development environment that brings together familiar tools from AWS analytics and AI/ML services for data processing, SQL analytics, ML model development, and generative AI application development to help teams collaborate and bring data products to market faster.
+This repository contains the model training pipeline for the SMUS framework. It provides automated ML model training, evaluation, and registration using SageMaker Pipelines orchestrated through GitHub Actions.
 
-A project in SageMaker Unified Studio acts as a logical boundary for all the data, tools, and compute needed for a particular business problem. You can import data from your business data catalog, Amazon Redshift, or other connectors such as Google BigQuery and Snowflake. Tooling includes components such as notebooks, queries, visual ETL, and generative AI playgrounds. With execution abstracted through managed connections that are either serverless or pre-configured by your administrator, you can concentrate on your code and data.
+## Repository Structure
+```
+model_build/
+├── README.md                           # This guide
+├── .github/workflows/                  # GitHub Actions CI/CD
+│   └── build_sagemaker_pipeline.yml    # Main build workflow
+├── ml_pipelines/                       # SageMaker Pipeline definitions
+│   ├── run_pipeline.py                 # Pipeline execution script
+│   ├── training/pipeline.py            # Main pipeline definition
+│   └── requirements.txt                # Pipeline dependencies
+└── source_scripts/                     # Processing scripts
+   ├── preprocessing/                   # Data preprocessing
+   ├── training/xgboost/                # XGBoost training
+   ├── evaluate/                        # Model evaluation
+   └── helpers/                         # Utility functions
+```
+## Architecture Overview
 
-## Discover, Build and Manage
+![aiops project architecture](/images/github_action_mlops_architecture.png)
 
-There are three menu options: **Discover**, **Build**, and **Manage**.
+The SMUS framework implements an event-driven architecture that automates the complete AIOps lifecycle through a sequential workflow, seamlessly connecting SageMaker Unified Studio project creation with production-ready infrastructure.
 
-### Discover
+1. The first step is configuring SageMaker Unified Studio environment, setting up domains, project profiles, and establishing the foundational infrastructure required for automated project creation and management.
 
-On the **Discover** menu, you have access to the business data catalog (powered by SageMaker Catalog) and its related resources, as well as generative AI playgrounds, model catalogs, and shared assets.
+2. GitHub connections are configured and necessary AWS infrastructure is deployed including EventBridge rules, Step Functions workflows, and Lambda functions that will orchestrate the automated repository setup and deployment processes.
 
-### Build
+3. Data scientists log into SageMaker Unified Studio and create a new project by selecting from available project templates defined in the project profile and configuring GitHub integration settings.
 
-The **Build** menu provides tools for data analysis and tools for data analysis and engineering, including our poly-compute JupyterLab Notebooks, a multi-engine SQL editor, AI-powered Visual ETL, and Airflow-based workflow tools. With the Machine Learning secondary menu, you can take your data and apply it to classical machine learning from experimentation to hosting inference endpoints. With the generative AI features, you can customize and build apps with Amazon Bedrock's Generative AI tooling suite. All of our tools are enhanced by Amazon Q for improving productivity and empowering users to focus on their goals.
+4. Project creation generates a CreateProject event that is captured by EventBridge, triggering a Step Functions workflow that automatically creates and configures both build and deploy repositories in your GitHub organization, complete with template-specific seed code and GitHub Actions workflows.
 
-### Manage
+5. Code changes are pushed to the build repository or the workflow is manually triggered, causing the GitHub Actions build pipeline to automatically activate, executing environment setup, dependency installation, and pipeline validation.
 
-On the **Manage** menu, administrators can manage the SageMaker Unified Studio domains, account associations, and end-user permissions.
+6. The build workflow orchestrates the execution of the SageMaker pipeline, which processes data through preprocessing, feature engineering, model training, and evaluation with comprehensive monitoring and logging.
 
-## Q assistant
+7. ML pipeline tracking occurs if tracking server is setup, enabling experiment tracking and model lineage management throughout the training process.
 
-Use Amazon Q, at any time from the top right of SageMaker Unified Studio toolbar, to generate code, tests, and debugs, and implement generated code with multi-step planning and reasoning capabilities.
+8. Model registration automatically occurs upon successful pipeline completion, registering the trained model in SageMaker Model Registry with detailed metadata, training metrics, and lineage information, initially set to "PendingManualApproval" status.
 
-## Projects
+9. Data scientists or ML engineers review the model performance metrics and manually approve the model in SageMaker Model Registry, changing its status from "PendingManualApproval" to "Approved".
 
-### Project Overview
+10. The model approval event is automatically detected by EventBridge, which invokes a deployment Lambda function that triggers the GitHub Actions deployment workflow in the deploy repository using the workflow_dispatch mechanism.
 
-The **Project Overview** gives you one central place to manage everything in your project. You can see and work with all your project resources - including code, data, and compute - in a single view. Your team can access notebooks, run queries, and manage workflows all in the same place. This unified environment lets you focus on using the tools you need, without worrying about the underlying AWS infrastructure that powers them.
+11. The deployment workflow retrieves the approved model, applies infrastructure as code definitions using AWS CDK, and provisions or updates a SageMaker endpoint with comprehensive validation, error handling, and rollback capabilities.
 
-### Members
+12. The deployed endpoint becomes active and ready to serve real-time predictions, completing the automated journey from project creation to production deployment with full traceability and governance.
 
-The **Members** tab provides a view of the users and groups you've invited to collaborate on your project, along with their respective roles. Members can either be owners or contributors in a project.
+This repository handles steps 5-8 of the AIOps workflow, focusing on the model training and registration phases.
 
-### Data
+## Configuration Requirements
 
-The **Data** tab shows all data with which you can operate. You can either upload new datasets or connect to exist databases that you might have access to. For more information on adding data to your project, check the documentation.
+### Required GitHub Secrets
+Configure in repository Settings → Secrets and variables → Actions:
 
-### Compute
+- `OIDC_ROLE_GITHUB_WORKFLOW`: IAM role ARN for GitHub Actions authentication
+- `SAGEMAKER_PIPELINE_ROLE_ARN`: IAM role for SageMaker pipeline execution
+- `SAGEMAKER_PROJECT_NAME`: SageMaker project name
+- `SAGEMAKER_PROJECT_ID`: Unique SageMaker project identifier
+- `REGION`: AWS region for resource deployment
+- `ARTIFACT_BUCKET`: S3 bucket for storing pipeline artifacts
+- `MODEL_PACKAGE_GROUP_NAME`: Model Registry package group name
+- `GLUE_DATABASE`: Glue database name containing your dataset
+- `GLUE_TABLE`: Glue table name with your training data
 
-The **Compute** tab displays the configured clusters (such as Spark), databases (such as Amazon Redshift), Spaces (IDEs like JupyterLab), HyperPods, and MLFlow tracking servers, along with other execution endpoints configured for the project. From any of its tabs, you can add additional compute connections to your project as permitted by your administrators. Please check your project profile details to understand the compute allowed in your project.
+### Required GitHub Variables
+- `TRIGGER_PIPELINE_EXECUTION`: Set to `"true"` to enable pipeline execution (default: `"false"`)
 
-## JupyterLab
+## Setup and Configuration
 
-Under the build menu, you can access JupyterLab. The getting_started.ipynb notebook covers the basics of using SageMaker Unified Studio connections with Python kernel for Spark and ML, and is intended as an introduction to the notebook functionality for those not familiar with SageMaker Unified Studio connections.
+1. **Configure Glue Data Source**: Create Glue table in SageMaker Unified Studio and update GitHub secrets with actual database and table names.
 
-## Query Editor
+2. **Enable Pipeline Execution**: Set `TRIGGER_PIPELINE_EXECUTION` variable to `"true"` in repository settings.
 
-The query editor in SageMaker Unified Studio (available under the Build menu) is where you perform data analysis using SQL, supporting both Amazon Redshift and Amazon Athena query engines. The tool makes it simple to connect to your existing data. You can write and run queries, visualize results, view query history, and generate SQL queries using Amazon Q.  For more detailed information, refer to the Query editor documentation.
+3. **Verify Configuration**: Ensure all required secrets and variables are properly configured.
 
-## Workflows
+## Pipeline Execution
 
-Workflows in SageMaker Unified Studio allow you to set up and run a series of tasks using Apache Airflow to model data processing procedures and orchestrate code artifacts. You can create workflows in Python code, test them, and access detailed errors and logs on the Workflows page. The tool provides features to view workflow details, including run results, task completions, and parameters.  You can run workflows with default or custom parameters, and monitor their progress on the Runs tab.  Click create workflow to open a python editor in JupyterLab with a sample workflow script. For more advanced visualizations, you can access the Airflow UI to view charts and graphics about the workflow.
+### Manual Execution
+1. Navigate to repository Actions tab
+2. Select "Sagemaker Pipeline build SMUS project"
+3. Click "Run workflow"
 
-## Machine Learning
+### Automatic Execution
+- Triggers on code changes to `ml_pipelines/` or `source_scripts/` directories
+- Requires `TRIGGER_PIPELINE_EXECUTION=true` to proceed
 
-Below we mention some of the ML features. Please visit our documentation for details list of all Machine Learning features in Amazon SageMaker Unified Studio.
+## Run Pipeline Locally
 
-### JumpStart
+### Prerequisites
+- Python 3.10 or Miniconda
+- AWS CLI configured with appropriate credentials
 
-Apart from building models in JupyterLab, SageMaker Unified Studio also provides access to more than 150 Machine Learning configurable open-source models that support one click deployment and fine tuning. These include foundation models as well as models for natural language processing, object detection, and image classification models. You can explore models by navigating to the "Serverful Model catalog" under the "Discover" menu. 
+### Setup Local Environment
+```bash
+# Clone and setup
+cd model_build
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-### Experiments (MLFlow)
+### Run Pipeline Locally
+```bash
+python ./ml_pipelines/run_pipeline.py \
+  --module-name training.pipeline \
+  --role-arn <SAGEMAKER_PIPELINE_ROLE_ARN> \
+  --tags '[{"Key":"sagemaker:project-name", "Value":"<PROJECT_NAME>"}, {"Key":"sagemaker:project-id", "Value":"<PROJECT_ID>"}]' \
+  --kwargs '{"region":"<REGION>","role":"<ROLE_ARN>","default_bucket":"<BUCKET>","pipeline_name":"local-test-pipeline","model_package_group_name":"<MODEL_GROUP>","glue_database_name":"<GLUE_DB>","glue_table_name":"<GLUE_TABLE>"}'
+```
 
-SageMaker Unified Studio offers managed MLflow capabilities for creating, analyzing, and managing machine learning experiments. Users can log metrics, parameters, and model information to view and compare experiments, as well as register MLflow Models for management and deployment. Visit the compute tab to check for existing MLFlow tracking servers for your project or create a new one. To access the list of experiments in a project, users can navigate to the "Build" option in the main menu and select "Experiments" from the drop-down menu. 
+## Troubleshooting
 
-### Model Registry
+### Common Issues:
 
-The Model Registry in Amazon SageMaker Unified Studio enables users to catalog models and manage their deployment to production by creating Model Groups that track different versions of models trained for specific problems. Users can register models by navigating to the "Build" menu, selecting "Models," and choosing "Register," with options to select model artifacts from various sources. Registered models can be published to the business data catalog to allow discovery and sharing across the broader organization.
+1. **Pipeline execution is disabled**:
+   - **Cause**: `TRIGGER_PIPELINE_EXECUTION` variable is not set to `"true"`
+   - **Solution**: Set the variable to `"true"` in repository settings
 
-## Generative AI
+2. **Glue database/table not found**:
+   - **Cause**: `GLUE_DATABASE` or `GLUE_TABLE` secrets have incorrect values
+   - **Solution**: Update secrets with actual database and table names from SageMaker Unified Studio
 
-Amazon Bedrock IDE in SageMaker Unified Studio is your all-in-one workspace for building GenAI applications without complex development setup. The tool provides a comprehensive environment where you can discover foundation models through the Model catalog, experiment with different input types in Playgrounds, and build sophisticated chat applications with custom guardrails and data sources. Using the Flow builder, you can create end-to-end AI workflows by connecting prompts and models, while the Prompt builder helps you create and manage your prompts effectively. The Amazon Bedrock IDE includes built-in model evaluation capabilities to assess performance, and a shared gallery for team collaboration on apps, guardrails, and functions. To get started, simply ensure your administrator has enabled GenAI tools access in the admin console.
+3. **Pipeline monitoring fails**:
+   - **Cause**: Missing `sagemaker:ListPipelineExecutions` permission
+   - **Solution**: Ensure IAM role has required SageMaker permissions
 
-## Project Storage
+4. **GitHub Actions cannot assume role**:
+   - **Cause**: OIDC trust relationship not configured correctly
+   - **Solution**: Verify trust relationship includes correct GitHub organization
 
-Each project comes with a default storage powered by Amazon S3 or a 3rd party repository such as GitHub as configured by your administrator. 
+5. **Workflow shows "skipped"**:
+   - **Cause**: `TRIGGER_PIPELINE_EXECUTION` is set to `"false"`
+   - **Solution**: This is expected behavior when pipeline execution is disabled
 
-## Data and Model catalog
+### Log Locations:
+- **GitHub Actions**: Repository → Actions tab → Workflow run
+- **SageMaker Pipeline**: AWS Console → SageMaker → Pipelines
+- **CloudWatch Logs**: `/aws/sagemaker/ProcessingJobs` and `/aws/sagemaker/TrainingJobs`
 
-We hope you enjoy using SageMaker Unified Studio and we look forward to hearing from you. Please use the Feedback icon in the top right corner of your screen to provide feedback.
+### Debug Commands:
+```bash
+# Check pipeline executions
+aws sagemaker list-pipeline-executions --pipeline-name "githubactions-<project-id>"
+
+# Check failed steps
+aws sagemaker list-pipeline-execution-steps --pipeline-execution-arn "<execution-arn>" --query 'PipelineExecutionSteps[?StepStatus==`Failed`]'
+```
+
+
+## Troubleshooting
+
+### Common Issues:
+
+1. **Pipeline execution is disabled**:
+   - **Cause**: `TRIGGER_PIPELINE_EXECUTION` variable is not set to `"true"`
+   - **Solution**: Set the variable to `"true"` in repository settings
+
+2. **Glue database/table not found**:
+   - **Cause**: `GLUE_DATABASE` or `GLUE_TABLE` secrets have incorrect values
+   - **Solution**: Update secrets with actual database and table names from SageMaker Unified Studio
+
+3. **Pipeline monitoring fails**:
+   - **Cause**: Missing `sagemaker:ListPipelineExecutions` permission
+   - **Solution**: Ensure IAM role has required SageMaker permissions
+
+4. **GitHub Actions cannot assume role**:
+   - **Cause**: OIDC trust relationship not configured correctly
+   - **Solution**: Verify trust relationship includes correct GitHub organization
+
+5. **Workflow shows "skipped"**:
+   - **Cause**: `TRIGGER_PIPELINE_EXECUTION` is set to `"false"`
+   - **Solution**: This is expected behavior when pipeline execution is disabled
+
+### Log Locations:
+- **GitHub Actions**: Repository → Actions tab → Workflow run
+- **SageMaker Pipeline**: AWS Console → SageMaker → Pipelines
+- **CloudWatch Logs**: `/aws/sagemaker/ProcessingJobs` and `/aws/sagemaker/TrainingJobs`
+
+### Debug Commands:
+```bash
+# Check pipeline executions
+aws sagemaker list-pipeline-executions --pipeline-name "githubactions-<project-id>"
+
+# Check failed steps
+aws sagemaker list-pipeline-execution-steps --pipeline-execution-arn "<execution-arn>" --query 'PipelineExecutionSteps[?StepStatus==`Failed`]'
+```
+
+## Clean-up
+
+To clean up resources:
+1. Delete the SageMaker pipeline from the AWS Console
+2. Remove model packages from SageMaker Model Registry
+3. Clean up S3 artifacts if no longer needed
+4. Delete GitHub repository if no longer needed
+
+
+
