@@ -118,7 +118,8 @@ python ./ml_pipelines/run_pipeline.py \
 1. **Pipeline execution is disabled**:
    - **Cause**: `TRIGGER_PIPELINE_EXECUTION` variable is not set to `"true"`
    - **Solution**: Set the variable to `"true"` in repository settings
-
+  
+   - 
 2. **Glue database/table not found**:
    - **Cause**: `GLUE_DATABASE` or `GLUE_TABLE` secrets have incorrect values
    - **Solution**: Update secrets with actual database and table names from SageMaker Unified Studio
